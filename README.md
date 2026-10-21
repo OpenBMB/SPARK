@@ -49,7 +49,7 @@ SPARK is a lightweight framework that learns adaptive knowledge participation po
 1. Create Conda Environment
 ```bash
 conda create --name spark python==3.10.0
-conda activate shift
+conda activate spark
 git clone https://github.com/OpenBMB/SPARK.git
 cd SPARK
 ```
