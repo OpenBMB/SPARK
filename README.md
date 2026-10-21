@@ -74,7 +74,6 @@ bash vllm/patch_vllm.sh
 > Note: Please run this script after 'pip install -r requirements.', because installing or reinstalling vLLM may overwrite the patched files.
 
 ### ⚡ Data
-<!-- todo: 已创建repo, 数据待上传 -->
 
 Our training data can be downloaded from [SPARK_Training_Data](https://huggingface.co/datasets/ITcoder/SPARK_Training_Data). After downloading, place the files into the dataset folder.
 
