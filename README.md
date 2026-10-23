@@ -81,7 +81,7 @@ Our training data can be downloaded from [SPARK_Training_Data](https://huggingfa
 To construct the data from scratch, download the files from [MRQA-Shared-Task-2019](https://github.com/mrqa/MRQA-Shared-Task-2019).  
 Use the downloaded data to synthesize it with [FlashRAG](https://github.com/RUC-NLPIR/FlashRAG).
 
-
+< todo: 代码待更新 >
 ### 🔥 Training
 GRPO with a single GPU: 
 ```
@@ -94,10 +94,10 @@ python multi_gpu.py
 
 
 ### 📊 Evaluation
-<!-- todo: 更新最新的sft和spark的checkpoints: 1.7B 和 8B, 已创建repo, ckpt待上传-->
 
 We provide the SFT checkpoints and the trained checkpoints(https://huggingface.co/ITcoder/SPARK) on Hugging Face.  
 
+< todo: 代码待更新 >
 To evaluate on the MRQA and ConfiQA benchmarks: 
 ```
 python eval.py
