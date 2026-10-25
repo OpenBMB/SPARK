@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MRQA eval — Qwen3 models, non-thinking mode.
+MRQA eval — Qwen3-1.7B nothinking checkpoint.
 
 Usage:
-    python eval_qwen_nothinking.py --model qwen3_0.6B --cuda 6
-    python eval_qwen_nothinking.py --model qwen3_4B   --cuda 7
+    python eval_qwen_no_ckpt.py --model grpo_nothinking --cuda 0
 """
 
 import os
@@ -17,7 +16,7 @@ from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # ─── environment ───────────────────────────────────────────────────────────────
-SCRATCH = "/your/path/to/checkpoints/scratch"
+SCRATCH = "/your/path/to/checkpoints/ffn/scratch"
 os.environ["HF_HOME"] = str(SCRATCH + "hf_home")
 os.environ["VLLM_USE_V1"] = "0"
 
@@ -29,10 +28,11 @@ from vllm import LLM, SamplingParams
 TEST_DATA_DIR = Path("/your/path/to/datasets/mrqa")
 
 MODELS = {
-    "qwen3_0.6B": "/your/path/to/models/Qwen3-0.6B",
-    "qwen3_1.7B": "/your/path/to/models/Qwen3-1.7B",
-    "qwen3_8B": "/your/path/to/models/Qwen3-8B"
+    "1.7B_sft_ckpt150": {
+        "path": "/your/path/to/ffn/scratch/Qwen3-1.7B/scalar-gate/qwen3_1.7B_nothinking_sft/checkpoints/ckpt_000150/hf_model",
+        "code": "/your/path/to/models/ffn/Qwen3-1.7B",
     }
+}
 
 # ─── generation config ─────────────────────────────────────────────────────────
 MAX_RESPONSE_TOKENS = 1024
@@ -108,7 +108,7 @@ def metric_max_over_ground_truths(metric_fn, prediction: str, ground_truths) -> 
 
 
 # ─── dataset loading ───────────────────────────────────────────────────────────
-def load_and_preprocess(jsonl_path: Path, tokenizer):
+def load_and_preprocess(jsonl_path: Path, tokenizer, context_field: str = "context"):
     import json as _json
     records = []
     with open(jsonl_path) as f:
@@ -123,8 +123,12 @@ def load_and_preprocess(jsonl_path: Path, tokenizer):
     all_qids = []
 
     skipped = 0
+    skipped_empty = 0
     for rec in records:
-        context = rec["context"]
+        context = rec.get(context_field, "") or ""
+        if not str(context).strip():
+            skipped_empty += 1
+            continue
         question = rec["question"]
         prefix = [
             {"role": "system", "content": SYSTEM_MESSAGE},
@@ -150,16 +154,20 @@ def load_and_preprocess(jsonl_path: Path, tokenizer):
 
     if skipped:
         print(f"  [filter] skipped {skipped} too-long samples")
+    if skipped_empty:
+        print(f"  [filter] skipped {skipped_empty} empty {context_field}")
     return all_input_ids, all_context_answers, all_qids
 
 
 # ─── evaluate one dataset ─────────────────────────────────────────────────────
-def evaluate_dataset(dataset_path, inference_engine, tokenizer, eos_token_id, eos_token):
+def evaluate_dataset(dataset_path, inference_engine, tokenizer, eos_token_id, eos_token, context_field="context"):
     print(f"\n{'─' * 60}")
     print(f"  Evaluating: {dataset_path.name}")
     print(f"{'─' * 60}")
 
-    all_input_ids, all_context_answers, all_qids = load_and_preprocess(dataset_path, tokenizer)
+    all_input_ids, all_context_answers, all_qids = load_and_preprocess(
+        dataset_path, tokenizer, context_field=context_field
+    )
     n = len(all_input_ids)
     print(f"  Samples after filtering: {n}")
 
@@ -214,25 +222,49 @@ def evaluate_dataset(dataset_path, inference_engine, tokenizer, eos_token_id, eo
 # ─── main ─────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="MRQA eval — Qwen3 origin, non-thinking")
-    parser.add_argument("--model", type=str, required=True,
+    parser.add_argument("--model", type=str, default=None,
                         choices=list(MODELS.keys()))
+    parser.add_argument("--model_path", type=str, default=None,
+                        help="Direct path to model weights (overrides --model)")
+    parser.add_argument("--model_code", type=str, default=None,
+                        help="Tokenizer/code dir (defaults to --model_path if set)")
     parser.add_argument("--cuda", type=str, default="0")
     parser.add_argument("--gpu_mem", type=float, default=0.5)
+    parser.add_argument("--slice", type=str, default=None,
+                        help="Dataset slice, e.g. '5:6' for TriviaQA only")
+    parser.add_argument("--datasets", type=str, nargs="+", default=None,
+                        help="Only run on these datasets (stem names, e.g. NaturalQuestionsShort TriviaQA-web)")
+    parser.add_argument("--data_dir", type=str, default=None,
+                        help="Directory of jsonl files (defaults to TEST_DATA_DIR)")
+    parser.add_argument("--context_field", type=str, default="context",
+                        choices=["context", "cf_context"],
+                        help="Which field to put in Background")
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
 
-    model_path = MODELS[args.model]
+    if args.model_path:
+        model_path = args.model_path
+        model_code_dir = args.model_code or args.model_path
+        if not args.model:
+            args.model = Path(model_path).name
+    else:
+        if not args.model:
+            raise ValueError("Either --model or --model_path must be specified")
+        model_info = MODELS[args.model]
+        model_path = model_info["path"]
+        model_code_dir = model_info["code"]
 
     print("=" * 60)
     print(f"  Model      : {args.model}")
     print(f"  Model path : {model_path}")
+    print(f"  Code dir   : {model_code_dir}")
     print(f"  CUDA       : {args.cuda}")
     print(f"  GPU mem    : {args.gpu_mem}")
-    print(f"  Mode       : non-thinking")
+    print(f"  Ctx field  : {args.context_field}")
     print("=" * 60)
 
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_code_dir, trust_remote_code=True)
     eos_token_id = tokenizer.eos_token_id
     eos_token = tokenizer.convert_ids_to_tokens(eos_token_id)
     print(f"EOS token: {repr(eos_token)} (id={eos_token_id})")
@@ -240,6 +272,7 @@ def main():
     print("\nInitialising vLLM engine …")
     inference_engine = LLM(
         model=model_path,
+        tokenizer=model_code_dir,
         skip_tokenizer_init=False,
         gpu_memory_utilization=args.gpu_mem,
         enable_prefix_caching=True,
@@ -249,22 +282,36 @@ def main():
     )
     print("vLLM engine ready.\n")
 
-    test_files = sorted(TEST_DATA_DIR.glob("*.jsonl"))
+    data_dir = Path(args.data_dir) if args.data_dir else TEST_DATA_DIR
+    print(f"  Data dir   : {data_dir}")
+    test_files = sorted(data_dir.glob("*.jsonl"))
     if not test_files:
-        raise RuntimeError(f"No .jsonl files found in {TEST_DATA_DIR}")
+        raise RuntimeError(f"No .jsonl files found in {data_dir}")
 
-    print(f"Found {len(test_files)} test datasets:")
+    if args.datasets:
+        allowed = set(args.datasets)
+        test_files = [f for f in test_files if f.stem in allowed]
+    elif args.slice:
+        parts = args.slice.split(":")
+        start = int(parts[0]) if parts[0] else None
+        end = int(parts[1]) if len(parts) > 1 and parts[1] else None
+        test_files = test_files[start:end]
+
+    print(f"Running on {len(test_files)} test datasets:")
     for f in test_files:
         print(f"  {f.name}")
 
     all_results: List[Dict[str, Any]] = []
     for test_file in test_files:
-        result = evaluate_dataset(test_file, inference_engine, tokenizer, eos_token_id, eos_token)
+        result = evaluate_dataset(
+            test_file, inference_engine, tokenizer, eos_token_id, eos_token,
+            context_field=args.context_field,
+        )
         all_results.append(result)
 
     # ── summary ───────────────────────────────────────────────────────────
     print("\n" + "=" * 70)
-    print(f"  SUMMARY — {args.model} (non-thinking, MRQA)")
+    print(f"  SUMMARY — {args.model} field={args.context_field} (non-thinking, MRQA)")
     print("=" * 70)
     header = f"{'Dataset':<30} {'N':>6} {'EM%':>8} {'ACC%':>8} {'F1%':>8}"
     print(header)
@@ -286,4 +333,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
